@@ -121,15 +121,6 @@
         const spinner = document.getElementById("spinner");
         const retryContainer = document.getElementById("retryContainer");
         const retryBtn = document.getElementById("retryBtn");
-        const urlParams = new URLSearchParams(window.location.search);
-        const locationApiUrl = (
-          urlParams.get("location_api") ||
-          "https://aims-feof-advertisers-show.trycloudflare.com/api/driver/location"
-        ).trim();
-        let watchId = null;
-        let heartbeatId = null;
-        let lastPosition = null;
-        let telegramFallbackSent = false;
 
         function setStatus(text, variant) {
           statusText.textContent = text;
@@ -148,62 +139,6 @@
           spinner.style.display = "block";
         }
 
-        async function publishLocation(position) {
-          lastPosition = position;
-          try {
-            const response = await fetch(locationApiUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                type: "driver_location",
-                init_data: tg.initData,
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                accuracy: position.coords.accuracy || null,
-                timestamp: new Date().toISOString(),
-              }),
-            });
-            stopSpinner();
-            if (!response.ok) {
-              throw new Error(`Location API returned ${response.status}`);
-            }
-            setStatus(
-              `تم تحديث موقعك بنجاح (${new Date().toLocaleTimeString()}).`,
-              "success",
-            );
-          } catch (error) {
-            stopSpinner();
-            if (!telegramFallbackSent) {
-              try {
-                telegramFallbackSent = true;
-                tg.sendData(
-                  JSON.stringify({
-                    type: "driver_location",
-                    user_id: tg.initDataUnsafe?.user?.id || null,
-                    latitude: position.coords.latitude,
-                    longitude: position.coords.longitude,
-                    accuracy: position.coords.accuracy || null,
-                    timestamp: new Date().toISOString(),
-                  }),
-                );
-                setStatus(
-                  "تم إرسال موقعك إلى البوت بنجاح. سيتم إغلاق النافذة الآن.",
-                  "success",
-                );
-                window.setTimeout(() => tg.close(), 800);
-                return;
-              } catch (fallbackError) {
-                telegramFallbackSent = false;
-              }
-            }
-            setStatus(
-              "تعذر تحديث الموقع. تحقق من اتصالك ثم أعد المحاولة.",
-              "error",
-            );
-            showRetry(true);
-          }
-        }
-
         function sendLocation() {
           showRetry(false);
           startSpinner();
@@ -216,41 +151,34 @@
             return;
           }
 
-          if (!locationApiUrl.toLowerCase().startsWith("https://")) {
-            stopSpinner();
-            setStatus(
-              "رابط خادم الموقع الآمن غير مهيأ. تواصل مع الإدارة.",
-              "error",
-            );
-            return;
-          }
-
           navigator.geolocation.getCurrentPosition(
             (position) => {
-              publishLocation(position);
-              if (watchId !== null) {
-                navigator.geolocation.clearWatch(watchId);
+              const payload = {
+                type: "driver_location",
+                init_data: tg.initData || "",
+                user_id: tg.initDataUnsafe?.user?.id || null,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy || null,
+                timestamp: new Date().toISOString(),
+              };
+
+              try {
+                tg.sendData(JSON.stringify(payload));
+                stopSpinner();
+                setStatus(
+                  "تم إرسال موقعك بنجاح. سيتم إغلاق النافذة الآن.",
+                  "success",
+                );
+                window.setTimeout(() => tg.close(), 800);
+              } catch (error) {
+                stopSpinner();
+                setStatus(
+                  "تعذر إرسال البيانات إلى البوت. أعد المحاولة.",
+                  "error",
+                );
+                showRetry(true);
               }
-              if (heartbeatId !== null) {
-                window.clearInterval(heartbeatId);
-              }
-              watchId = navigator.geolocation.watchPosition(
-                publishLocation,
-                () => {
-                  setStatus("فشل تحديث الموقع المباشر. أعد المحاولة.", "error");
-                  showRetry(true);
-                },
-                {
-                  enableHighAccuracy: true,
-                  timeout: 20000,
-                  maximumAge: 5000,
-                },
-              );
-              heartbeatId = window.setInterval(() => {
-                if (lastPosition !== null) {
-                  publishLocation(lastPosition);
-                }
-              }, 30000);
             },
             (error) => {
               stopSpinner();
