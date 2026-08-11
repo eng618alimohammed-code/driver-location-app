@@ -129,6 +129,7 @@
         let watchId = null;
         let heartbeatId = null;
         let lastPosition = null;
+        let telegramFallbackSent = false;
 
         function setStatus(text, variant) {
           statusText.textContent = text;
@@ -172,6 +173,29 @@
             );
           } catch (error) {
             stopSpinner();
+            if (!telegramFallbackSent) {
+              try {
+                telegramFallbackSent = true;
+                tg.sendData(
+                  JSON.stringify({
+                    type: "driver_location",
+                    user_id: tg.initDataUnsafe?.user?.id || null,
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy || null,
+                    timestamp: new Date().toISOString(),
+                  }),
+                );
+                setStatus(
+                  "تم إرسال موقعك إلى البوت بنجاح. سيتم إغلاق النافذة الآن.",
+                  "success",
+                );
+                window.setTimeout(() => tg.close(), 800);
+                return;
+              } catch (fallbackError) {
+                telegramFallbackSent = false;
+              }
+            }
             setStatus(
               "تعذر تحديث الموقع. تحقق من اتصالك ثم أعد المحاولة.",
               "error",
