@@ -77,6 +77,10 @@
         margin-top: 14px;
       }
 
+      .hidden {
+        display: none;
+      }
+
       button {
         border: none;
         border-radius: 10px;
@@ -102,7 +106,7 @@
         <div class="spinner" id="spinner"></div>
         <div id="statusText">جاري تحديد الموقع...</div>
       </div>
-      <div class="action" id="retryContainer" style="display: none">
+      <div class="action hidden" id="retryContainer">
         <button id="retryBtn" type="button">إعادة المحاولة</button>
       </div>
     </div>
@@ -117,6 +121,11 @@
         const spinner = document.getElementById("spinner");
         const retryContainer = document.getElementById("retryContainer");
         const retryBtn = document.getElementById("retryBtn");
+        const urlParams = new URLSearchParams(window.location.search);
+        const locationApiUrl = (urlParams.get("location_api") || "").trim();
+        let watchId = null;
+        let heartbeatId = null;
+        let lastPosition = null;
 
         function setStatus(text, variant) {
           statusText.textContent = text;
@@ -135,6 +144,39 @@
           spinner.style.display = "block";
         }
 
+        async function publishLocation(position) {
+          lastPosition = position;
+          try {
+            const response = await fetch(locationApiUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "driver_location",
+                init_data: tg.initData,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                accuracy: position.coords.accuracy || null,
+                timestamp: new Date().toISOString(),
+              }),
+            });
+            stopSpinner();
+            if (!response.ok) {
+              throw new Error(`Location API returned ${response.status}`);
+            }
+            setStatus(
+              `تم تحديث موقعك بنجاح (${new Date().toLocaleTimeString()}).`,
+              "success",
+            );
+          } catch (error) {
+            stopSpinner();
+            setStatus(
+              "تعذر تحديث الموقع. تحقق من اتصالك ثم أعد المحاولة.",
+              "error",
+            );
+            showRetry(true);
+          }
+        }
+
         function sendLocation() {
           showRetry(false);
           startSpinner();
@@ -147,27 +189,41 @@
             return;
           }
 
+          if (!locationApiUrl.toLowerCase().startsWith("https://")) {
+            stopSpinner();
+            setStatus(
+              "رابط خادم الموقع الآمن غير مهيأ. تواصل مع الإدارة.",
+              "error",
+            );
+            return;
+          }
+
           navigator.geolocation.getCurrentPosition(
             (position) => {
-              const payload = {
-                type: "driver_location",
-                user_id: tg.initDataUnsafe?.user?.id || null,
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                accuracy: position.coords.accuracy || null,
-                timestamp: new Date().toISOString(),
-              };
-
-              try {
-                tg.sendData(JSON.stringify(payload));
-                stopSpinner();
-                setStatus("تم إرسال موقعك بنجاح. سيتم إغلاق النافذة الآن.", "success");
-                setTimeout(() => tg.close(), 900);
-              } catch (error) {
-                stopSpinner();
-                setStatus("تعذر إرسال البيانات إلى البوت. أعد المحاولة.", "error");
-                showRetry(true);
+              publishLocation(position);
+              if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
               }
+              if (heartbeatId !== null) {
+                window.clearInterval(heartbeatId);
+              }
+              watchId = navigator.geolocation.watchPosition(
+                publishLocation,
+                () => {
+                  setStatus("فشل تحديث الموقع المباشر. أعد المحاولة.", "error");
+                  showRetry(true);
+                },
+                {
+                  enableHighAccuracy: true,
+                  timeout: 20000,
+                  maximumAge: 5000,
+                },
+              );
+              heartbeatId = window.setInterval(() => {
+                if (lastPosition !== null) {
+                  publishLocation(lastPosition);
+                }
+              }, 30000);
             },
             (error) => {
               stopSpinner();
@@ -175,7 +231,7 @@
                 error?.code === 1
                   ? "تم رفض إذن الموقع. فعّل الإذن ثم أعد المحاولة."
                   : "تعذر الحصول على موقعك. حاول مرة أخرى.",
-                "error"
+                "error",
               );
               showRetry(true);
             },
@@ -183,7 +239,7 @@
               enableHighAccuracy: true,
               timeout: 15000,
               maximumAge: 0,
-            }
+            },
           );
         }
 
