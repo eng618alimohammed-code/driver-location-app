@@ -122,7 +122,10 @@
         const retryContainer = document.getElementById("retryContainer");
         const retryBtn = document.getElementById("retryBtn");
         const urlParams = new URLSearchParams(window.location.search);
-        const locationApiUrl = (urlParams.get("location_api") || "").trim();
+        const locationApiUrl = (
+          urlParams.get("location_api") ||
+          "https://aims-feof-advertisers-show.trycloudflare.com/api/driver/location"
+        ).trim();
         let watchId = null;
         let heartbeatId = null;
         let lastPosition = null;
